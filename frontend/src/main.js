@@ -2,6 +2,12 @@ import { createApp } from "vue";
 import "./style.css";
 import App from "./App.vue";
 
+// Check if iMin bridge is ready before loading Vue app
+if (!window.__iminReady) {
+    console.warn('imin bridge not detected yet; retrying...');
+    window.addEventListener('load', () => console.log(window.IminPrinter));
+}
+
 // JavaScript error logging setup
 const API_LOG = "/api/logs/js"; // proxied to FastAPI
 
