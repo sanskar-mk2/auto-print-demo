@@ -1,30 +1,52 @@
 <script setup>
 import { ref, onMounted } from "vue";
 
-const printerStatus = ref("not initialized");
+const printerStatus = ref("initializing...");
+const debugLogs = ref([]);
 const lastPrint = ref(null);
-const pollMs = 5000;
+const pollMs = 3000;
+
+function log(msg) {
+  const time = new Date().toLocaleTimeString();
+  debugLogs.value.unshift(`[${time}] ${msg}`);
+  printerStatus.value = msg;
+}
 
 function iminReady() {
-    return typeof window.IminPrintInstance !== "undefined";
+  return typeof window.IminPrintInstance !== "undefined";
+}
+
+async function waitForIminBridge(timeout = 10000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    if (iminReady()) return true;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
 }
 
 async function initPrinter() {
-    if (!iminReady()) {
-        printerStatus.value = "bridge missing";
-        return;
-    }
-    try {
-        await IminPrintInstance.initPrinter(
-            IminPrintInstance.PrintConnectType.SPI
-        );
-        printerStatus.value = "ready";
-        IminPrintInstance.setAlignment(1);
-        IminPrintInstance.setTextSize(28);
-        IminPrintInstance.printText("printer ready\n\n", 0);
-    } catch (e) {
-        printerStatus.value = "init error";
-    }
+  log("Checking for Imin bridge...");
+  const ready = await waitForIminBridge();
+
+  if (!ready) {
+    log("❌ Bridge not found — are you on an Imin POS?");
+    return;
+  }
+
+  log("✅ Bridge detected, initializing printer...");
+
+  try {
+    const connType = window.IminPrintInstance.PrintConnectType.SPI;
+    await window.IminPrintInstance.initPrinter(connType);
+    log("✅ Printer initialized successfully");
+
+    window.IminPrintInstance.setAlignment(1);
+    window.IminPrintInstance.setTextSize(28);
+    window.IminPrintInstance.printText("Printer Ready\n\n", 0);
+  } catch (e) {
+    log("⚠️ initPrinter() error: " + e.message);
+  }
 }
 
 function formatReceipt(o) {
@@ -76,41 +98,25 @@ onMounted(() => {
 </script>
 
 <template>
-    <main class="p-4 max-w-md mx-auto">
-        <h1 class="text-xl font-semibold mb-4">🍽️ Auto Print MVP</h1>
-        <div class="space-y-2 text-sm">
-            <div class="p-3 rounded border bg-white">
-                <div>
-                    <span class="font-medium">Printer:</span>
-                    {{ printerStatus }}
-                </div>
-                <div>
-                    <span class="font-medium">Last print:</span>
-                    {{ lastPrint || "—" }}
-                </div>
-            </div>
-
-            <div class="flex gap-2">
-                <button
-                    @click="initPrinter"
-                    class="px-3 py-2 rounded bg-blue-600 text-white"
-                >
-                    Init Printer
-                </button>
-                <button
-                    @click="pollOnce"
-                    class="px-3 py-2 rounded bg-emerald-600 text-white"
-                >
-                    Force Poll
-                </button>
-            </div>
-
-            <p class="text-xs text-gray-500 mt-2">
-                keep this page open in the imin webprint browser. new orders
-                auto-print.
-            </p>
-        </div>
-    </main>
+  <div style="font-family: monospace; padding: 1rem;">
+    <h2>Imin Printer Debug</h2>
+    <p>Status: <b>{{ printerStatus }}</b></p>
+    <p v-if="lastPrint">Last print: {{ lastPrint }}</p>
+    <div
+      style="
+        margin-top: 1rem;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        max-height: 300px;
+        overflow-y: auto;
+        background: #111;
+        color: #0f0;
+        padding: 0.5rem;
+      "
+    >
+      <div v-for="(msg, i) in debugLogs" :key="i">{{ msg }}</div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
