@@ -1,6 +1,19 @@
 import { createApp } from "vue";
+import { createRouter, createWebHistory } from "vue-router";
 import "./style.css";
 import App from "./App.vue";
+import PrinterPage from "./components/PrinterPage.vue";
+import AdminPage from "./components/AdminPage.vue";
+
+const routes = [
+  { path: "/", component: PrinterPage },
+  { path: "/admin", component: AdminPage }
+];
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes
+});
 
 // Check if iMin bridge is ready before loading Vue app
 if (!window.__iminReady) {
@@ -53,4 +66,4 @@ window.addEventListener("unhandledrejection", (e) => {
     });
 });
 
-createApp(App).mount("#app");
+createApp(App).use(router).mount("#app");
