@@ -1,7 +1,14 @@
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, onMounted, computed } from "vue";
 
-const printerStatus = ref("⏳ Connecting to print service...");
+// Authentication
+const token = ref("");
+const restaurantInfo = ref(null);
+const authError = ref("");
+const isAuthenticated = computed(() => !!restaurantInfo.value);
+
+// Printer
+const printerStatus = ref("⏳ Please enter your restaurant token to start");
 const lastPrint = ref(null);
 const logs = ref([]);
 const pollMs = 5000;
@@ -11,7 +18,46 @@ let IminPrintInstance = null;
 function log(msg) {
     const t = new Date().toLocaleTimeString();
     logs.value.unshift(`[${t}] ${msg}`);
-    printerStatus.value = msg;
+    if (isAuthenticated.value) {
+        printerStatus.value = msg;
+    }
+}
+
+// Authentication functions
+async function verifyToken(tokenValue) {
+    if (!tokenValue.trim()) {
+        authError.value = "";
+        restaurantInfo.value = null;
+        return;
+    }
+
+    try {
+        const response = await fetch(
+            `/api/restaurants/verify/${tokenValue.trim()}`
+        );
+        if (response.ok) {
+            restaurantInfo.value = await response.json();
+            authError.value = "";
+            // Save to localStorage
+            localStorage.setItem("restaurant_token", tokenValue.trim());
+            log(`✅ Authenticated as: ${restaurantInfo.value.name}`);
+        } else {
+            restaurantInfo.value = null;
+            authError.value = "Invalid token";
+        }
+    } catch (error) {
+        restaurantInfo.value = null;
+        authError.value = "Error verifying token";
+    }
+}
+
+function logout() {
+    token.value = "";
+    restaurantInfo.value = null;
+    authError.value = "";
+    localStorage.removeItem("restaurant_token");
+    printerStatus.value = "⏳ Please enter your restaurant token to start";
+    log("Logged out");
 }
 
 function waitForBridge(timeout = 10000) {
@@ -102,9 +148,17 @@ async function printOrder(o) {
 }
 
 async function pollOnce() {
+    if (!isAuthenticated.value) return;
+
     try {
-        const res = await fetch("/api/orders/poll");
-        if (!res.ok) return;
+        const res = await fetch(`/api/orders/poll?token=${token.value}`);
+        if (!res.ok) {
+            if (res.status === 404) {
+                log("❌ Token expired or invalid");
+                logout();
+            }
+            return;
+        }
         const orders = await res.json();
         for (const o of orders) await printOrder(o);
     } catch (err) {
@@ -113,7 +167,19 @@ async function pollOnce() {
 }
 
 onMounted(() => {
-    initPrinter();
+    // Load token from localStorage
+    const savedToken = localStorage.getItem("restaurant_token");
+    if (savedToken) {
+        token.value = savedToken;
+        verifyToken(savedToken);
+    }
+
+    // Only initialize printer if authenticated
+    if (isAuthenticated.value) {
+        initPrinter();
+    }
+
+    // Start polling
     setInterval(pollOnce, pollMs);
 });
 </script>
@@ -122,7 +188,47 @@ onMounted(() => {
     <main class="p-4 max-w-md mx-auto">
         <h1 class="text-xl font-semibold mb-4">🍽️ Auto Print MVP</h1>
 
-        <div class="space-y-2 text-sm">
+        <!-- Authentication Section -->
+        <div class="mb-4 p-3 rounded border bg-white">
+            <div v-if="!isAuthenticated" class="space-y-3">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        Restaurant Token
+                    </label>
+                    <div class="flex gap-2">
+                        <input
+                            v-model="token"
+                            @input="verifyToken(token)"
+                            type="text"
+                            placeholder="Enter your restaurant token"
+                            class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                    </div>
+                    <div v-if="authError" class="text-red-600 text-sm mt-1">
+                        {{ authError }}
+                    </div>
+                </div>
+            </div>
+
+            <div v-else class="flex justify-between items-center">
+                <div>
+                    <div class="text-green-600 font-medium">
+                        ✅ Signed in as: {{ restaurantInfo.name }}
+                    </div>
+                    <div class="text-xs text-gray-500">
+                        Token: {{ token.substring(0, 8) }}...
+                    </div>
+                </div>
+                <button
+                    @click="logout"
+                    class="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700"
+                >
+                    Logout
+                </button>
+            </div>
+        </div>
+
+        <div v-if="isAuthenticated" class="space-y-2 text-sm">
             <div class="p-3 rounded border bg-white">
                 <div>
                     <span class="font-medium">Printer:</span>
@@ -150,8 +256,8 @@ onMounted(() => {
             </div>
 
             <p class="text-xs text-gray-500 mt-2">
-                keep this page open in the iMin WebPrint browser. new orders
-                auto-print.
+                Keep this page open in the iMin WebPrint browser. New orders for
+                {{ restaurantInfo.name }} will auto-print.
             </p>
 
             <div
@@ -168,6 +274,13 @@ onMounted(() => {
             >
                 <div v-for="(l, i) in logs" :key="i">{{ l }}</div>
             </div>
+        </div>
+
+        <div v-else class="text-center text-gray-500 py-8">
+            <p>
+                Please enter your restaurant token above to start printing
+                orders.
+            </p>
         </div>
     </main>
 </template>
